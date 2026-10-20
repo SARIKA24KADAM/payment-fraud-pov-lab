@@ -51,12 +51,16 @@ def load_data(data_dir: Path) -> pd.DataFrame:
 
 
 def chronological_split(frame: pd.DataFrame, test_fraction: float = 0.2):
-    """Split by transaction time; use the latest fraction as an untouched holdout."""
+    """Split on a time boundary so equal timestamps cannot cross partitions."""
     ordered = frame.sort_values(TIME_KEY, kind="mergesort").reset_index(drop=True)
     cut = int(len(ordered) * (1 - test_fraction))
     if cut < 1 or cut >= len(ordered):
         raise ValueError("Dataset is too small for the requested temporal split.")
-    train, test = ordered.iloc[:cut].copy(), ordered.iloc[cut:].copy()
+    split_time = ordered.loc[cut, TIME_KEY]
+    train = ordered.loc[ordered[TIME_KEY] < split_time].copy()
+    test = ordered.loc[ordered[TIME_KEY] >= split_time].copy()
+    if train.empty or test.empty:
+        raise ValueError("Temporal boundary produced an empty partition.")
     if train[TIME_KEY].max() >= test[TIME_KEY].min():
         raise ValueError("Temporal split is not strictly ordered.")
     return train, test
@@ -70,7 +74,6 @@ def feature_columns(train: pd.DataFrame, include_identity: bool) -> list[str]:
             column for column in columns
             if not column.startswith("id_") and column != "_identity_available"
         ]
-    # Remove all-empty columns based on training data to keep imputation defined.
     return [column for column in columns if not train[column].isna().all()]
 
 
@@ -172,7 +175,7 @@ def run(data_dir: Path, output_dir: Path, thresholds: tuple[float, ...]) -> None
     pd.DataFrame(operating_rows).to_csv(output_dir / "operating_points.csv", index=False)
     metadata = {
         "dataset": "IEEE-CIS Fraud Detection (Kaggle)",
-        "split": "earliest 80% train; latest 20% holdout by TransactionDT",
+        "split": "earliest 80% train; latest 20% holdout by TransactionDT boundary",
         "train_time_max": float(train[TIME_KEY].max()),
         "holdout_time_min": float(holdout[TIME_KEY].min()),
         "thresholds": list(thresholds),
