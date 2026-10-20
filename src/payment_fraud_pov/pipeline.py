@@ -1,8 +1,10 @@
-"""Temporal fraud POV comparing transaction-only and identity-enriched signals."""
+"""Train and evaluate a fraud scoring baseline on supported public datasets."""
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import platform
 from pathlib import Path
 
 import numpy as np
@@ -10,6 +12,7 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import sklearn
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
@@ -23,6 +26,15 @@ TARGET = "isFraud"
 JOIN_KEY = "TransactionID"
 TIME_KEY = "TransactionDT"
 DEFAULT_THRESHOLDS = (0.01, 0.02, 0.05, 0.10, 0.20, 0.50)
+
+
+def file_sha256(path: Path) -> str:
+    """Hash a source file without loading the entire file into memory."""
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def load_data(data_dir: Path) -> pd.DataFrame:
@@ -41,6 +53,7 @@ def load_data(data_dir: Path) -> pd.DataFrame:
         frame = frame.rename(columns={"fraud": TARGET})
         frame.attrs["dataset"] = "Kaggle Credit Card Fraud Detection (card_transdata)"
         frame.attrs["split"] = "stratified random 80/20 holdout (random_state=42)"
+        frame.attrs["source_files"] = [card_path]
         return frame
 
     transactions = pd.read_csv(transactions_path)
@@ -64,6 +77,10 @@ def load_data(data_dir: Path) -> pd.DataFrame:
     transactions.attrs["split"] = (
         "earliest 80% train; latest 20% holdout by TransactionDT boundary"
     )
+    transactions.attrs["source_files"] = [
+        transactions_path,
+        *([identity_path] if identity_path.exists() else []),
+    ]
     return transactions
 
 
@@ -154,23 +171,41 @@ def run(data_dir: Path, output_dir: Path, thresholds: tuple[float, ...]) -> None
     frame = load_data(data_dir)
     dataset_name = frame.attrs.get("dataset", "unknown")
     split_description = frame.attrs.get("split", "")
+    labels = pd.to_numeric(frame[TARGET], errors="raise")
+    if labels.isna().any() or not set(labels.unique()).issubset({0, 1}):
+        raise ValueError(f"{TARGET!r} must contain only non-missing binary 0/1 labels.")
+    frame[TARGET] = labels.astype(int)
+    if frame.empty:
+        raise ValueError("The selected dataset has no transaction rows.")
     if "TransactionDT" in frame:
         train, holdout = chronological_split(frame)
     else:
-        train, holdout = train_test_split(
-            frame, test_size=0.2, random_state=42,
-            stratify=frame[TARGET].astype(int),
-        )
+        try:
+            train, holdout = train_test_split(
+                frame, test_size=0.2, random_state=42,
+                stratify=frame[TARGET],
+            )
+        except ValueError as exc:
+            raise ValueError(
+                "Stratified holdout needs at least two rows in each label class."
+            ) from exc
     y_train = train[TARGET].astype(int).to_numpy()
     y_holdout = holdout[TARGET].astype(int).to_numpy()
     if np.unique(y_train).size < 2 or np.unique(y_holdout).size < 2:
         raise ValueError("Both temporal partitions must contain fraud and non-fraud cases.")
 
     model_rows, operating_rows = [], []
-    model_specs = (
-        (("transaction_only", False), ("transaction_plus_identity", True))
-        if "TransactionDT" in frame else (("transaction_features", False),)
-    )
+    identity_features = [
+        column for column in train.columns
+        if column.startswith("id_") and not train[column].isna().all()
+    ]
+    if "TransactionDT" in frame and identity_features:
+        model_specs = (("transaction_only", False),
+                       ("transaction_plus_identity", True))
+    elif "TransactionDT" in frame:
+        model_specs = (("transaction_only", False),)
+    else:
+        model_specs = (("transaction_features", False),)
     for name, use_identity in model_specs:
         columns = feature_columns(train, include_identity=use_identity)
         if not columns:
@@ -200,13 +235,29 @@ def run(data_dir: Path, output_dir: Path, thresholds: tuple[float, ...]) -> None
     pd.DataFrame(model_rows).to_csv(output_dir / "model_comparison.csv", index=False)
     pd.DataFrame(operating_rows).to_csv(output_dir / "operating_points.csv", index=False)
     write_plots(pd.DataFrame(model_rows), pd.DataFrame(operating_rows), output_dir)
+    source_hashes = {
+        source.name: file_sha256(source)
+        for source in frame.attrs.get("source_files", [])
+    }
     metadata = {
         "dataset": dataset_name,
+        "source_files_sha256": source_hashes,
         "split": split_description,
+        "train_rows": len(train),
+        "holdout_rows": len(holdout),
+        "holdout_fraud_rate": float(y_holdout.mean()),
+        "versions": {
+            "python": platform.python_version(),
+            "numpy": np.__version__,
+            "pandas": pd.__version__,
+            "scikit_learn": sklearn.__version__,
+            "matplotlib": matplotlib.__version__,
+        },
         "train_time_max": float(train[TIME_KEY].max()) if TIME_KEY in train else None,
         "holdout_time_min": float(holdout[TIME_KEY].min()) if TIME_KEY in holdout else None,
         "thresholds": list(thresholds),
-        "synthetic_or_customer_data": "card_transdata" in dataset_name.lower(),
+        "data_is_simulated": "card_transdata" in dataset_name.lower(),
+        "customer_data_used": False,
         "production_ready": False,
     }
     (output_dir / "run_metadata.json").write_text(
@@ -229,7 +280,7 @@ def write_plots(model_results: pd.DataFrame, operating_results: pd.DataFrame,
         ax.bar_label(bars, fmt="%.3f", padding=4)
         ax.set_ylim(0, 1.08)
         ax.set_ylabel("Score")
-        ax.set_title("Holdout performance — transaction features")
+        ax.set_title("Holdout performance - transaction features")
     else:
         for _, row in model_results.iterrows():
             ax.scatter(row["roc_auc"], row["average_precision_pr_auc"], s=110,
@@ -263,6 +314,21 @@ def write_plots(model_results: pd.DataFrame, operating_results: pd.DataFrame,
     fig.savefig(output_dir / "operating_points.png", dpi=160)
     plt.close(fig)
 
+    if len(model_results) == 1:
+        row = model_results.iloc[0]
+        fraud_count = round(row["holdout_rows"] * row["holdout_fraud_rate"])
+        counts = [row["holdout_rows"] - fraud_count, fraud_count]
+        fig, ax = plt.subplots(figsize=(7, 5))
+        bars = ax.bar(["Legitimate", "Fraud"], counts,
+                      color=["#2563eb", "#e4572e"], width=0.55)
+        ax.bar_label(bars, labels=[f"{int(n):,}" for n in counts], padding=4)
+        ax.set_ylabel("Transactions")
+        ax.set_title("Holdout class balance")
+        ax.grid(axis="y", alpha=0.25)
+        fig.tight_layout()
+        fig.savefig(output_dir / "class_balance.png", dpi=160)
+        plt.close(fig)
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -273,8 +339,11 @@ def main() -> None:
         help="Score thresholds for the operating-point comparison.",
     )
     args = parser.parse_args()
-    if any(value < 0 or value > 1 for value in args.thresholds):
-        parser.error("Thresholds must be between 0 and 1.")
+    if any(not np.isfinite(value) or value < 0 or value > 1
+           for value in args.thresholds):
+        parser.error("Thresholds must be finite values between 0 and 1.")
+    if len(set(args.thresholds)) != len(args.thresholds):
+        parser.error("Thresholds must not contain duplicates.")
     run(args.data_dir, args.output_dir, tuple(args.thresholds))
 
 

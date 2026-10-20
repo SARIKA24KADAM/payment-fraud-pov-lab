@@ -1,6 +1,19 @@
 {
   "dataset": "Kaggle Credit Card Fraud Detection (card_transdata)",
+  "source_files_sha256": {
+    "card_transdata.csv": "7013c329bae9ef0ef32d65dbeb095694f0c7cd6c00ff74b2d0087fa1c67b8717"
+  },
   "split": "stratified random 80/20 holdout (random_state=42)",
+  "train_rows": 800000,
+  "holdout_rows": 200000,
+  "holdout_fraud_rate": 0.087405,
+  "versions": {
+    "python": "3.12.0",
+    "numpy": "2.1.1",
+    "pandas": "2.3.3",
+    "scikit_learn": "1.5.2",
+    "matplotlib": "3.10.9"
+  },
   "train_time_max": null,
   "holdout_time_min": null,
   "thresholds": [
@@ -11,6 +24,7 @@
     0.2,
     0.5
   ],
-  "synthetic_or_customer_data": true,
+  "data_is_simulated": true,
+  "customer_data_used": false,
   "production_ready": false
 }
