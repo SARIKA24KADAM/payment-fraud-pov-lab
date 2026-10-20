@@ -7,6 +7,9 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
@@ -173,6 +176,7 @@ def run(data_dir: Path, output_dir: Path, thresholds: tuple[float, ...]) -> None
     output_dir.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(model_rows).to_csv(output_dir / "model_comparison.csv", index=False)
     pd.DataFrame(operating_rows).to_csv(output_dir / "operating_points.csv", index=False)
+    write_plots(pd.DataFrame(model_rows), pd.DataFrame(operating_rows), output_dir)
     metadata = {
         "dataset": "IEEE-CIS Fraud Detection (Kaggle)",
         "split": "earliest 80% train; latest 20% holdout by TransactionDT boundary",
@@ -185,6 +189,45 @@ def run(data_dir: Path, output_dir: Path, thresholds: tuple[float, ...]) -> None
     (output_dir / "run_metadata.json").write_text(
         json.dumps(metadata, indent=2) + "\n", encoding="utf-8"
     )
+
+
+def write_plots(model_results: pd.DataFrame, operating_results: pd.DataFrame,
+                output_dir: Path) -> None:
+    """Write PNG visualizations from this run's measured holdout results."""
+    colors = {"transaction_only": "#2563eb",
+              "transaction_plus_identity": "#e4572e"}
+    fig, ax = plt.subplots(figsize=(8, 5))
+    for _, row in model_results.iterrows():
+        ax.scatter(row["roc_auc"], row["average_precision_pr_auc"], s=110,
+                   color=colors.get(row["model"], "#666666"), label=row["model"])
+        ax.annotate(row["model"].replace("_", " "),
+                    (row["roc_auc"], row["average_precision_pr_auc"]),
+                    xytext=(7, 7), textcoords="offset points", fontsize=8)
+    ax.set(xlabel="ROC-AUC", ylabel="Average precision (PR-AUC)",
+           title="Holdout model comparison")
+    ax.grid(alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(output_dir / "model_comparison.png", dpi=160)
+    plt.close(fig)
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    for name, group in operating_results.groupby("model", sort=False):
+        group = group.sort_values("threshold")
+        ax.plot(group["false_positive_rate"], group["fraud_capture_rate"],
+                marker="o", color=colors.get(name, "#666666"), label=name)
+        for _, row in group.iterrows():
+            ax.annotate(f"{row['threshold']:.0%}",
+                        (row["false_positive_rate"], row["fraud_capture_rate"]),
+                        xytext=(4, 4), textcoords="offset points", fontsize=7)
+    ax.set(xlabel="False-positive rate", ylabel="Fraud capture rate",
+           title="Holdout operating points by score threshold")
+    ax.set_xlim(left=0)
+    ax.set_ylim(0, 1.02)
+    ax.grid(alpha=0.25)
+    ax.legend(fontsize=8)
+    fig.tight_layout()
+    fig.savefig(output_dir / "operating_points.png", dpi=160)
+    plt.close(fig)
 
 
 def main() -> None:
