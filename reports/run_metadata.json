@@ -1,0 +1,16 @@
+{
+  "dataset": "Kaggle Credit Card Fraud Detection (card_transdata)",
+  "split": "stratified random 80/20 holdout (random_state=42)",
+  "train_time_max": null,
+  "holdout_time_min": null,
+  "thresholds": [
+    0.01,
+    0.02,
+    0.05,
+    0.1,
+    0.2,
+    0.5
+  ],
+  "synthetic_or_customer_data": true,
+  "production_ready": false
+}

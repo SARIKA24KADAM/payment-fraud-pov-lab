@@ -1,0 +1,2 @@
+model,train_rows,holdout_rows,holdout_fraud_rate,average_precision_pr_auc,roc_auc,feature_count,identity_available_holdout_share
+transaction_features,800000,200000,0.087405,0.7573312924820407,0.9795306908262449,7,

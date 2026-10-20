@@ -1,32 +1,27 @@
 # Data and generated artifacts
 
-## Dataset provenance
+## Dataset in this run
 
-The analysis is designed for the IEEE-CIS Fraud Detection competition dataset, distributed through [Kaggle](https://www.kaggle.com/competitions/ieee-fraud-detection/data). It is not bundled here: access requires a Kaggle account and acceptance of the competition's terms. Download `train_transaction.csv` and `train_identity.csv` yourself and place them in `data/raw/`. The identity file is optional; without it, the identity-enriched model has no identity columns and should not be interpreted as an identity lift comparison.
+This run uses Kaggle's [Credit Card Fraud Detection dataset](https://www.kaggle.com/datasets/dhanushnarayanan/credit-card-fraud), specifically `card_transdata.csv`. Because Kaggle credentials were not configured in this workspace, the file was obtained from a [public Hugging Face mirror](https://huggingface.co/datasets/arjund1999/CCFraud/blob/main/card_transdata.csv). The file is 76,277,977 bytes (about 73 MB), with SHA-256 `7013c329bae9ef0ef32d65dbeb095694f0c7cd6c00ff74b2d0087fa1c67b8717`. Refer to the Kaggle page for the current dataset terms and attribution requirements.
 
-Do not commit the downloaded competition files or any private/customer data. The `.gitignore` excludes files under `data/raw/` and generated files under `reports/` by default. This repository contains the code, analysis documentation, API example, and reproducibility instructions, but no benchmark records or run results because no dataset was present when this documentation was prepared.
+The CSV columns are `distance_from_home`, `distance_from_last_transaction`, `ratio_to_median_purchase_price`, `repeat_retailer`, `used_chip`, `used_pin_number`, `online_order`, and `fraud`. The seven behavior columns are model features. `fraud` is the binary target; the pipeline renames it to `isFraud` internally.
 
-## Expected source files
+There is no event timestamp or separate identity table in this source. The pipeline uses a stratified random 80/20 train/holdout split with `random_state=42` and trains one transaction-feature model. These results are not a temporal evaluation and do not establish the value of identity signals.
 
-| File | Use | Required fields |
-| --- | --- | --- |
-| `data/raw/train_transaction.csv` | Transaction features, binary label, and relative event time | `TransactionID`, `TransactionDT`, `isFraud` |
-| `data/raw/train_identity.csv` | Optional identity attributes joined one-to-one to transactions | `TransactionID` |
+The downloaded file is stored at `data/raw/card_transdata.csv`. Raw data is ignored by Git and has not been uploaded to the repository. This avoids redistributing it without confirming the Kaggle dataset's terms. Generated CSV/JSON summaries and PNG charts in `reports/` are tracked with the project.
 
-The pipeline holds out the latest 20% by `TransactionDT` boundary. It excludes `TransactionID`, `TransactionDT`, and `isFraud` from model features. The transaction-only model excludes columns beginning `id_`; the enriched model includes them when available.
+## Generated artifacts
 
-## Generated files
+Running the command in the main README writes these files to `reports/`:
 
-Running the documented command writes these artifacts to `reports/`:
+- `model_comparison.csv`: holdout row counts, fraud rate, feature count, average precision (PR-AUC), and ROC-AUC.
+- `operating_points.csv`: precision, fraud capture, false-positive rate, legitimate approval rate, and flagged share at each threshold.
+- `model_comparison.png`: holdout ROC-AUC and PR-AUC visualization.
+- `operating_points.png`: fraud capture against false-positive rate, with thresholds labeled.
+- `run_metadata.json`: dataset, split method, configured thresholds, and non-production status.
 
-- `model_comparison.csv`: row counts, prevalence, feature counts, PR-AUC, ROC-AUC, and identity availability.
-- `operating_points.csv`: precision, fraud capture, false-positive rate, legitimate approval rate, and flagged share per model and threshold.
-- `model_comparison.png`: scatter plot comparing holdout ROC-AUC and average precision.
-- `operating_points.png`: fraud capture versus false-positive rate, with score thresholds labeled.
-- `run_metadata.json`: dataset identifier, split description and time boundary, thresholds, and non-production status.
+The PNGs are generated from the downloaded dataset's measured holdout results. The pipeline does not save per-transaction predictions.
 
-CSV/JSON outputs and PNGs are reproducible from the same source files, dependency versions, code, and command-line thresholds. The generated PNGs are not checked in as static sample results; run the pipeline against your authorized local copy to generate them. The pipeline deliberately does not persist per-transaction predictions.
+## Other project material
 
-## Other project inputs
-
-`docs/api_contract.md` contains illustrative synthetic request/response JSON for interface discussion; it is not dataset input and does not call an API. `docs/customer_pov.md` describes the proposed evaluation and interpretation. No customer data, credentials, or external identity API responses are included.
+`docs/api_contract.md` contains synthetic request and response examples for discussing a hypothetical identity API. Those examples are not part of the dataset or model inputs. `docs/customer_pov.md` outlines an evaluation workflow and its limitations.

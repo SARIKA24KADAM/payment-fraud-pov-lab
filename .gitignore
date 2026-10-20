@@ -7,3 +7,6 @@ data/raw/*
 !data/raw/.gitkeep
 reports/*
 !reports/.gitkeep
+!reports/*.csv
+!reports/*.json
+!reports/*.png

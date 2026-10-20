@@ -14,6 +14,7 @@ from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score, roc_auc_score
+from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
@@ -25,13 +26,22 @@ DEFAULT_THRESHOLDS = (0.01, 0.02, 0.05, 0.10, 0.20, 0.50)
 
 
 def load_data(data_dir: Path) -> pd.DataFrame:
-    """Load competition training files and join identity attributes when present."""
+    """Load either IEEE-CIS files or the Kaggle card_transdata benchmark."""
     transactions_path = data_dir / "train_transaction.csv"
+    card_path = data_dir / "card_transdata.csv"
     if not transactions_path.exists():
-        raise FileNotFoundError(
-            f"Missing {transactions_path}. Download the Kaggle training files "
-            "and place them in the selected data directory."
-        )
+        if not card_path.exists():
+            raise FileNotFoundError(
+                f"Missing {card_path}. Place the Kaggle card_transdata.csv file "
+                "in the selected data directory."
+            )
+        frame = pd.read_csv(card_path)
+        if "fraud" not in frame:
+            raise ValueError("card_transdata.csv must contain a 'fraud' column.")
+        frame = frame.rename(columns={"fraud": TARGET})
+        frame.attrs["dataset"] = "Kaggle Credit Card Fraud Detection (card_transdata)"
+        frame.attrs["split"] = "stratified random 80/20 holdout (random_state=42)"
+        return frame
 
     transactions = pd.read_csv(transactions_path)
     if TARGET not in transactions or TIME_KEY not in transactions:
@@ -50,6 +60,10 @@ def load_data(data_dir: Path) -> pd.DataFrame:
     transactions["_identity_available"] = transactions.filter(
         regex=r"^id_"
     ).notna().any(axis=1)
+    transactions.attrs["dataset"] = "IEEE-CIS Fraud Detection (Kaggle)"
+    transactions.attrs["split"] = (
+        "earliest 80% train; latest 20% holdout by TransactionDT boundary"
+    )
     return transactions
 
 
@@ -138,17 +152,26 @@ def score_operating_points(
 
 def run(data_dir: Path, output_dir: Path, thresholds: tuple[float, ...]) -> None:
     frame = load_data(data_dir)
-    train, holdout = chronological_split(frame)
+    dataset_name = frame.attrs.get("dataset", "unknown")
+    split_description = frame.attrs.get("split", "")
+    if "TransactionDT" in frame:
+        train, holdout = chronological_split(frame)
+    else:
+        train, holdout = train_test_split(
+            frame, test_size=0.2, random_state=42,
+            stratify=frame[TARGET].astype(int),
+        )
     y_train = train[TARGET].astype(int).to_numpy()
     y_holdout = holdout[TARGET].astype(int).to_numpy()
     if np.unique(y_train).size < 2 or np.unique(y_holdout).size < 2:
         raise ValueError("Both temporal partitions must contain fraud and non-fraud cases.")
 
     model_rows, operating_rows = [], []
-    for name, use_identity in (
-        ("transaction_only", False),
-        ("transaction_plus_identity", True),
-    ):
+    model_specs = (
+        (("transaction_only", False), ("transaction_plus_identity", True))
+        if "TransactionDT" in frame else (("transaction_features", False),)
+    )
+    for name, use_identity in model_specs:
         columns = feature_columns(train, include_identity=use_identity)
         if not columns:
             raise ValueError(f"No usable features found for {name}.")
@@ -178,12 +201,12 @@ def run(data_dir: Path, output_dir: Path, thresholds: tuple[float, ...]) -> None
     pd.DataFrame(operating_rows).to_csv(output_dir / "operating_points.csv", index=False)
     write_plots(pd.DataFrame(model_rows), pd.DataFrame(operating_rows), output_dir)
     metadata = {
-        "dataset": "IEEE-CIS Fraud Detection (Kaggle)",
-        "split": "earliest 80% train; latest 20% holdout by TransactionDT boundary",
-        "train_time_max": float(train[TIME_KEY].max()),
-        "holdout_time_min": float(holdout[TIME_KEY].min()),
+        "dataset": dataset_name,
+        "split": split_description,
+        "train_time_max": float(train[TIME_KEY].max()) if TIME_KEY in train else None,
+        "holdout_time_min": float(holdout[TIME_KEY].min()) if TIME_KEY in holdout else None,
         "thresholds": list(thresholds),
-        "synthetic_or_customer_data": False,
+        "synthetic_or_customer_data": "card_transdata" in dataset_name.lower(),
         "production_ready": False,
     }
     (output_dir / "run_metadata.json").write_text(
@@ -195,16 +218,27 @@ def write_plots(model_results: pd.DataFrame, operating_results: pd.DataFrame,
                 output_dir: Path) -> None:
     """Write PNG visualizations from this run's measured holdout results."""
     colors = {"transaction_only": "#2563eb",
-              "transaction_plus_identity": "#e4572e"}
+              "transaction_plus_identity": "#e4572e",
+              "transaction_features": "#2563eb"}
     fig, ax = plt.subplots(figsize=(8, 5))
-    for _, row in model_results.iterrows():
-        ax.scatter(row["roc_auc"], row["average_precision_pr_auc"], s=110,
-                   color=colors.get(row["model"], "#666666"), label=row["model"])
-        ax.annotate(row["model"].replace("_", " "),
-                    (row["roc_auc"], row["average_precision_pr_auc"]),
-                    xytext=(7, 7), textcoords="offset points", fontsize=8)
-    ax.set(xlabel="ROC-AUC", ylabel="Average precision (PR-AUC)",
-           title="Holdout model comparison")
+    if len(model_results) == 1:
+        row = model_results.iloc[0]
+        values = [row["roc_auc"], row["average_precision_pr_auc"]]
+        bars = ax.bar(["ROC-AUC", "Average precision\n(PR-AUC)"], values,
+                      color=colors.get(row["model"], "#2563eb"), width=0.55)
+        ax.bar_label(bars, fmt="%.3f", padding=4)
+        ax.set_ylim(0, 1.08)
+        ax.set_ylabel("Score")
+        ax.set_title("Holdout performance — transaction features")
+    else:
+        for _, row in model_results.iterrows():
+            ax.scatter(row["roc_auc"], row["average_precision_pr_auc"], s=110,
+                       color=colors.get(row["model"], "#666666"), label=row["model"])
+            ax.annotate(row["model"].replace("_", " "),
+                        (row["roc_auc"], row["average_precision_pr_auc"]),
+                        xytext=(7, 7), textcoords="offset points", fontsize=8)
+        ax.set(xlabel="ROC-AUC", ylabel="Average precision (PR-AUC)",
+               title="Holdout model comparison")
     ax.grid(alpha=0.25)
     fig.tight_layout()
     fig.savefig(output_dir / "model_comparison.png", dpi=160)

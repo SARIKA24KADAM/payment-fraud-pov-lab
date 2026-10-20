@@ -1,34 +1,28 @@
 # Customer proof-of-value plan
 
-## Business question
+## What this demo shows
 
-For a hypothetical online payments workflow, do identity-related signals add useful fraud-ranking information beyond transaction attributes, and what fraud-capture versus legitimate-customer-friction trade-offs appear at candidate review thresholds?
+The current run uses Kaggle's simulated `card_transdata.csv` benchmark to demonstrate fraud ranking and the trade-off between fraud capture and legitimate transactions flagged for review. Its stratified random split is useful for a basic model demonstration, but it does not show future-in-time performance, customer value, or the incremental value of identity signals.
 
-This project can support a technical discussion. It cannot prove customer value because the benchmark is not the customer's traffic, fraud labels, economics, or operating environment.
+## A real customer evaluation
 
-## Proposed POV workflow
-
-1. **Clarify the decision.** Agree what “fraud captured,” “false positive,” “review,” and “approved” mean in the customer's workflow. Identify the action triggered by each score band.
-2. **Verify data and labels.** Confirm transaction keys, timestamps, fraud-label maturity, join coverage, missingness, and whether the identity record is available before the payment decision.
-3. **Establish a baseline.** Score transaction-only data with a regularized logistic-regression model.
-4. **Test incremental signal.** Repeat the same time split and modeling approach with identity attributes added. Compare ranking and operating points.
-5. **Review operating trade-offs.** Compare fraud capture, false-positive rate, legitimate approval rate, precision, and the share flagged for review at several thresholds. Select thresholds with the customer using their costs and capacity; this repository does not optimize an assumed cost function.
-6. **QA integration.** Validate request/response schema, key matching, missing and unavailable signals, latency, and consistent event-time interpretation.
-7. **Present findings.** State the tested population and period, exclusions, join coverage, uncertainty, recommended next experiment, and limitations.
+1. **Agree on the decision.** Define fraud captured, false positive, review, and approval in the customer's workflow, including what action each score band triggers.
+2. **Confirm the data.** Use authorized representative data. Check transaction keys, event timestamps, label maturity, missingness, and whether fields are available before the payment decision.
+3. **Set a baseline.** Agree on a simple baseline and a chronological train, validation, and test design that reflects the intended use.
+4. **Test added signals.** If identity signals are available and approved for evaluation, compare transaction-only features against transaction plus identity features on the same partitions.
+5. **Review operating trade-offs.** Compare fraud capture, false-positive rate, legitimate approval rate, precision, and review volume. Select thresholds with the customer's actual costs and capacity.
+6. **Check integration.** Validate schema, key matching, missing signals, latency, event-time handling, and fallback behavior.
+7. **Report limits clearly.** Describe the population, time period, exclusions, join coverage, uncertainty, and next experiment.
 
 ## Metrics
 
-- **Average precision (PR-AUC):** useful for comparing ranking under class imbalance; depends on prevalence.
-- **Fraud capture rate (recall):** fraction of labeled fraud transactions flagged at a selected threshold.
-- **False-positive rate:** fraction of legitimate transactions flagged.
-- **Legitimate approval rate:** fraction of legitimate transactions below the threshold.
-- **Precision:** fraction of flagged transactions labeled fraud.
-- **Review-or-decline share:** fraction of all transactions at or above the threshold. Whether those are reviewed or declined is a workflow decision.
+- **Average precision (PR-AUC):** summarizes ranking quality and is useful under class imbalance; it depends on fraud prevalence.
+- **Fraud capture (recall):** share of labeled fraud transactions flagged at a threshold.
+- **False-positive rate:** share of legitimate transactions flagged.
+- **Legitimate approval rate:** share of legitimate transactions below the threshold.
+- **Precision:** share of flagged transactions that are labeled fraud.
+- **Review-or-decline share:** share of all transactions at or above the threshold; the workflow determines what happens to them.
 
-Metrics are reported on a later time period than training. The pipeline's threshold table is an exploratory operating curve; thresholds are not selected on a separate validation set, so use a three-way train/validation/test design before making a final threshold recommendation.
+## Limits and responsible use
 
-## Caveats and responsible use
-
-The IEEE-CIS dataset is an anonymized competition benchmark. It may contain engineered or obfuscated features and does not guarantee that a field is available at authorization time. Temporal ordering is based on the provided relative time field. Results are not evidence of performance for Mastercard or any merchant.
-
-Before any real use, require representative authorized data, label maturity checks, fraud-loss and review-cost definitions, privacy and security review, jurisdiction-specific compliance review, fairness analysis where applicable, independent validation, production monitoring, latency testing, and an agreed fallback for missing signals. Never use this demonstration to make actual payment decisions.
+The current benchmark is simulated and does not represent a specific processor or merchant. Its fields and score behavior may differ from a real payment workflow. Never use this demo to make actual payment decisions. A real evaluation needs authorized representative data, label and field-availability checks, agreed fraud and review costs, privacy and security review, fairness review where applicable, independent validation, monitoring, latency testing, and an agreed fallback for missing signals.
