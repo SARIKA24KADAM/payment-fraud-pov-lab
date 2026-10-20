@@ -1,0 +1,7 @@
+model,threshold,validation_cost_per_1000,test_cost_per_1000,selected_on_validation
+transaction_features,0.01,6125.62,6128.17,False
+transaction_features,0.02,5568.295,5564.245,False
+transaction_features,0.05,4104.384999999999,4096.504999999999,False
+transaction_features,0.1,2962.565,2956.165,False
+transaction_features,0.2,2011.3349999999998,2016.6750000000002,False
+transaction_features,0.5,1813.655,1889.8500000000001,True

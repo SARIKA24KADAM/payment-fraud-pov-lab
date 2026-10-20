@@ -19,7 +19,7 @@ The file contains seven feature columns and one target:
 | `online_order` | Model feature |
 | `fraud` | Fraud label (the pipeline renames this internally to `isFraud`) |
 
-This dataset has no timestamp or separate identity table. The pipeline therefore uses a stratified random 80/20 train/holdout split with `random_state=42` and trains one transaction-feature model. The results are not a future-in-time evaluation and do not measure identity-signal lift. The pipeline also supports IEEE-CIS files if those are placed in `data/raw/` instead; when both formats are present, it uses the IEEE-CIS transaction file.
+This dataset has no timestamp or separate identity table. The pipeline uses a stratified random 60/20/20 split for training, validation, and test with fixed random seeds, then trains one transaction-feature model. The validation set selects a threshold; the test set provides the final evaluation. The results are not a future-in-time evaluation and do not measure identity-signal lift. The pipeline also supports IEEE-CIS files if those are placed in `data/raw/` instead; when both formats are present, it uses the IEEE-CIS transaction file and creates chronological 60/20/20 partitions.
 
 For this CSV, the seven behavior fields are median-imputed if needed, scaled, and passed to a class-weighted logistic-regression model. For IEEE-CIS input, categorical fields are one-hot encoded and the transaction-only and identity-enriched models are compared only when usable identity columns are present.
 
@@ -52,10 +52,10 @@ python -m pip install -e .
 python -m payment_fraud_pov.pipeline --data-dir data/raw --output-dir reports
 ```
 
-Thresholds default to 1%, 2%, 5%, 10%, 20%, and 50%. You can supply others:
+The candidate score thresholds default to 1%, 2%, 5%, 10%, 20%, and 50%. The pipeline selects the candidate with the lowest validation cost, then reports its cost on the untouched test split. Default illustrative costs are 250 units per missed fraud, 1 unit per reviewed transaction, and 10 additional units per legitimate transaction flagged. Cost is calculated as missed-fraud loss plus review cost for every flagged transaction plus false-decline cost for flagged legitimate transactions. These generic units are examples, not business estimates. Set assumptions and candidates explicitly if you have better estimates:
 
 ```bash
-python -m payment_fraud_pov.pipeline --data-dir data/raw --output-dir reports --thresholds 0.03 0.08 0.15
+python -m payment_fraud_pov.pipeline --data-dir data/raw --output-dir reports --thresholds 0.03 0.08 0.15 --missed-fraud-cost 300 --review-cost 2 --false-decline-cost 12
 ```
 
 ## Generated files
@@ -64,14 +64,16 @@ The run writes these files to `reports/`. They are kept in the repository so the
 
 | File | What it contains |
 | --- | --- |
-| `model_comparison.csv` | Holdout row counts, fraud rate, feature count, average precision (PR-AUC), and ROC-AUC. |
-| `operating_points.csv` | Precision, fraud capture, false-positive rate, legitimate approval rate, and flagged share at each threshold. |
-| `model_comparison.png` | A chart showing holdout ROC-AUC and PR-AUC. |
-| `operating_points.png` | A chart of fraud capture versus false-positive rate, with thresholds labeled. |
-| `class_balance.png` | Counts of legitimate and fraud rows in the holdout partition. |
-| `run_metadata.json` | Dataset name, input file hashes, split details, thresholds, package versions, and non-production status. |
+| `model_comparison.csv` | Validation and test ranking metrics, selected threshold, cost estimates, and row counts. |
+| `operating_points.csv` | Test precision, fraud capture, false-positive rate, approval rate, and cost at each threshold. Marks the validation-selected threshold. |
+| `cost_analysis.csv` | Validation and test estimated cost per 1,000 transactions for each candidate threshold. |
+| `model_comparison.png` | A chart showing test ROC-AUC and PR-AUC. |
+| `operating_points.png` | A chart of test fraud capture versus false-positive rate, with thresholds labeled. |
+| `cost_impact.png` | Validation and test cost curves, the selected threshold, and a no-review baseline. |
+| `class_balance.png` | Counts of legitimate and fraud rows in the test partition. |
+| `run_metadata.json` | Dataset name, input file hashes, split details, cost assumptions, package versions, and non-production status. |
 
-The checked-in run uses 800,000 training rows and a 200,000-row holdout. Holdout PR-AUC is 0.7573 and ROC-AUC is 0.9795. These results describe this simulated benchmark and random split only. The model uses class-weighted logistic regression; its scores are not calibrated probabilities. Thresholds are exploratory examples, not recommendations, and there is no separate validation set used to choose them. The pipeline does not save per-transaction predictions.
+In the checked-in run, validation selected a score threshold of 0.50. On the untouched test set, PR-AUC was 0.7575, ROC-AUC was 0.9795, fraud capture at that threshold was 94.8%, and estimated cost was 1,889.85 generic units per 1,000 transactions. The no-review baseline was 21,851.25 units under the same assumptions. These cost figures are illustrative and are not currency or expected customer savings. The model is fit on training data only; its class-weighted scores are not calibrated probabilities. The simulated benchmark and random split do not establish real-world performance. Results can change if you use different cost assumptions or candidate thresholds. The pipeline does not save per-transaction predictions.
 
 ## Other project materials
 

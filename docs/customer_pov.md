@@ -2,7 +2,7 @@
 
 ## What this demo shows
 
-The current run uses Kaggle's simulated `card_transdata.csv` benchmark to demonstrate fraud ranking and the trade-off between fraud capture and legitimate transactions flagged for review. Its stratified random split is useful for a basic model demonstration, but it does not show future-in-time performance, customer value, or the incremental value of identity signals.
+The current run uses Kaggle's simulated `card_transdata.csv` benchmark with stratified training, validation, and test partitions. The validation partition selects a threshold using stated cost assumptions; the untouched test partition reports how that choice performs. This is useful for demonstrating evaluation structure, but it does not show future-in-time performance, customer value, or the incremental value of identity signals.
 
 ## A real customer evaluation
 
@@ -22,6 +22,8 @@ The current run uses Kaggle's simulated `card_transdata.csv` benchmark to demons
 - **Legitimate approval rate:** share of legitimate transactions below the threshold.
 - **Precision:** share of flagged transactions that are labeled fraud.
 - **Review-or-decline share:** share of all transactions at or above the threshold; the workflow determines what happens to them.
+
+The demo's estimated cost is missed-fraud loss plus review cost for every flagged payment plus additional false-decline cost for each flagged legitimate payment. Its defaults are generic placeholders. A customer evaluation should replace them with agreed costs and capacity assumptions before selecting a threshold.
 
 ## Limits and responsible use
 
